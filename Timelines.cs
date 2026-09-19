@@ -1,0 +1,18 @@
+using Tl;
+
+namespace TlJump;
+
+public readonly record struct JumpClip(float Height);
+
+public readonly record struct JumpTrack(float Scale) : IBlend<JumpClip>
+{
+    public void Blend(in JumpClip first, in JumpClip second, float factor, out JumpClip result)
+        => result = new(first.Height + (second.Height - first.Height) * factor);
+}
+
+public readonly record struct SoundClip(float Code);
+
+public readonly record struct SoundTrack : IBlend<SoundClip>
+{
+    public void Blend(in SoundClip first, in SoundClip second, float factor, out SoundClip result) => result = first;
+}

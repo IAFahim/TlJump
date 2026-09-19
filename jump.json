@@ -1,0 +1,17 @@
+{
+  "name": "jump",
+  "duration": 6,
+  "loop": true,
+  "tracks": [
+    {
+      "name": "arc",
+      "namespace": "TlJump",
+      "type": "JumpTrack",
+      "data": { "Scale": 1.0 },
+      "clips": [
+        { "name": "rise", "namespace": "TlJump", "type": "JumpClip", "start": 0, "end": 3, "data": { "Height": 3.0 } },
+        { "name": "fall", "namespace": "TlJump", "type": "JumpClip", "start": 3, "end": 6, "data": { "Height": -3.0 } }
+      ]
+    }
+  ]
+}

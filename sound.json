@@ -1,0 +1,17 @@
+{
+  "name": "sound",
+  "duration": 6,
+  "loop": true,
+  "tracks": [
+    {
+      "name": "events",
+      "namespace": "TlJump",
+      "type": "SoundTrack",
+      "data": {},
+      "clips": [
+        { "name": "takeoff", "namespace": "TlJump", "type": "SoundClip", "start": 0, "end": 1, "data": { "Code": 1.0 } },
+        { "name": "touchdown", "namespace": "TlJump", "type": "SoundClip", "start": 5, "end": 6, "data": { "Code": 2.0 } }
+      ]
+    }
+  ]
+}
