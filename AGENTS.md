@@ -51,23 +51,11 @@ entity.Add(new TimelineIndex(jump));      // which timeline (interned ushort —
 entity.Add(new TimelinePosition(0));      // playback position
 Timeline.Bake(jump, world, entity);       // fires per-pair bakes → adds JumpY + Sfx
 
-foreach (var (ids, positions, jumps) in world.Query<TimelineIndex, TimelinePosition, JumpY>()
-                 .EnumerateChunks<TimelineIndex, TimelinePosition, JumpY>())
-{
-    Timeline<JumpTrack, JumpClip>.Apply(
-        MemoryMarshal.Cast<TimelineIndex, ushort>(ids),
-        MemoryMarshal.Cast<TimelinePosition, ushort>(positions),
-        true,
-        MemoryMarshal.Cast<JumpY, float>(jumps));
-    Timeline.Step(
-        MemoryMarshal.Cast<TimelineIndex, ushort>(ids),
-        MemoryMarshal.Cast<TimelinePosition, ushort>(positions),
-        true);
-}
+world.Run<JumpTrack, JumpClip, TimelineIndex, TimelinePosition, JumpY>();
 ```
 
-- `Apply` is read-only on positions and gathers the measured delta at `Position` into the effect span. `Step` advances `Position` once — apply then move, once per chunk per frame.
-- The archetype spans ARE tl's row columns: `MemoryMarshal.Cast` reinterprets each component span in place (`TimelineIndex→ushort`, `TimelinePosition→ushort`, `JumpY→float`) and the whole chunk goes through one `Apply` + one `Step` — no per-row loop, no copy, no managed row buffers. This requires the components to be single-field blittable structs with public fields.
+- `World.Run<TTrack, TClip, TIndex, TPosition, TEffect>()` is the whole frame (from the `Tl.Frent` adapter, project-referenced from `../tl/src/Tl.Frent`): it queries the three lane components as chunks, casts each span in place, and runs the fused in-out `Apply` (effect gather + position advance in one SIMD pass) per chunk. Generic over structs, so the JIT specializes it per instantiation — identical machine code to the handwritten `MemoryMarshal.Cast` loop.
+- Under the hood the archetype spans ARE tl's row columns — no per-row loop, no copy, no managed row buffers.
 - `TimelineIndex`/`TimelinePosition` must have real storage of exactly 2 bytes: `record struct TimelineIndex(ushort Value);` (positional record parameters become stored properties — sizeof 2). The tempting `struct TimelineIndex(ushort value);` is a trap: plain-struct primary-constructor parameters are NOT fields, the struct has no instance state (sizeof 1), `MemoryMarshal.Cast` then halves the span length and tl throws `Column length must equal position count` — and all data would be zero even if lengths passed. Plain structs with public fields also work (and are the only form that binds to `ref`/`in` single-element spans).
 - Empty archetypes the entity migrated through still match the query shape — `Apply`/`Step` handle zero-length spans, but guard any direct indexing.
 - `Apply` measures the whole asset: every pair's `Execute` sums into one lane per asset. Tracks that must feed independent channels go in separate assets.

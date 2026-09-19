@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using Frent;
 using Tl;
 using TlJump;
@@ -11,26 +10,13 @@ entity.Add(new Position());
 entity.Add(new TimelineIndex(jump));
 entity.Add(new TimelinePosition(0));
 
-Timeline.Bake(jump, world, entity); // fires AttachJump + AttachSound → adds JumpY and Sfx
+Timeline.Bake(jump, world, entity);
 
 for (var frame = 0; frame < 14; frame++)
 {
-    foreach (var (ids, timelinePosition, position, jumps) in world
-                 .Query<TimelineIndex, TimelinePosition, Position, JumpY>()
-                 .EnumerateChunks<TimelineIndex, TimelinePosition, Position, JumpY>())
-    {
-        // the archetype spans ARE tl's row columns: cast in place,
-        // one Apply + one Step for the whole chunk
-        Timeline<JumpTrack, JumpClip>.Apply(
-            MemoryMarshal.Cast<TimelineIndex, ushort>(ids),
-            MemoryMarshal.Cast<TimelinePosition, ushort>(timelinePosition),
-            true,
-            MemoryMarshal.Cast<JumpY, float>(jumps));
-        Timeline.Step(
-            MemoryMarshal.Cast<TimelineIndex, ushort>(ids),
-            MemoryMarshal.Cast<TimelinePosition, ushort>(timelinePosition),
-            true);
-        if (jumps.Length != 0) // empty archetypes the entity migrated through still match the query shape
-            Console.WriteLine($"frame {frame}: y = {jumps[0].Value:F0}");
-    }
+    // the whole lane: one generic call — chunks cast in place, one fused Apply per chunk
+    world.Run<JumpTrack, JumpClip, TimelineIndex, TimelinePosition, JumpY>();
+
+    foreach (var jumpY in world.Query<JumpY>().Enumerate<JumpY>())
+        Console.WriteLine($"frame {frame}: y = {jumpY.Item1.Value.Value:F0}");
 }
