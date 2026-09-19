@@ -11,7 +11,7 @@ public readonly record struct JumpClip(float Height);
 public readonly record struct JumpTrack(float Scale) : IBlend<JumpClip>
 {
     public void Blend(in JumpClip first, in JumpClip second, float factor, out JumpClip result)
-        => result = new(first.Height + (second.Height - first.Height) * factor);
+        => result = new JumpClip(first.Height + (second.Height - first.Height) * factor);
 }
 
 public readonly record struct SoundClip(ushort Code);
