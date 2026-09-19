@@ -7,12 +7,14 @@ A minimal tl × Frent consumer, split the way the library intends:
 - **Programmer** writes the `ITrack`/`IBake` structs and the per-entity loop; `Tl.Gen.CSharp` wires consumers and bakes at compile time.
 
 ```text
-  tick 0  y = 3      jump!       ← MoveY.Execute + PlaySound.Execute per entity
-  tick 1  y = 6
-  tick 2  y = 9                  ← arc peak
-  tick 3  y = 6
-  tick 4  y = 3
-  tick 5  y = 0      land!       ← wraps, loops
+jump!                            ← PlaySound.Execute ran at bind (takeoff clip, code 1)
+land!                            ← touchdown clip, code 2
+frame 0: y = 3
+frame 1: y = 6
+frame 2: y = 9                   ← arc peak
+frame 3: y = 6
+frame 4: y = 3
+frame 5: y = 0                   ← wraps, loops
 ```
 
 ## The split
@@ -48,7 +50,7 @@ public readonly record struct JumpTrack(float Scale) : IBlend<JumpClip>
 
 `IBlend` interpolates adjacent clips inside transition windows — return a real lerp.
 
-**`Consumers.cs`** — the jobs. `ITrack<TTrack, TClip>.Execute(in frame, ref effect)` is where per-entity work happens — the frame carries `Clip`, `Track`, `TimelineTick`, `Direction`, and flags, so the consumer decides what to do from authored data:
+**`Consumers.cs`** — the jobs. `ITrack<TTrack, TClip>.Execute(in frame, ref effect)` is the pair's job — the frame carries `Clip`, `Track`, `TimelineTick`, `Direction`, and flags, so the consumer works from authored data:
 
 ```csharp
 public readonly struct MoveY : ITrack<JumpTrack, JumpClip>
@@ -61,12 +63,13 @@ public readonly struct PlaySound : ITrack<SoundTrack, SoundClip>
 {
     public static void Execute(in Frame<SoundTrack, SoundClip> frame, ref float channel)
     {
-        channel = frame.Clip.Code;
         if (frame.Clip.Code == 1) Console.WriteLine("jump!");
         if (frame.Clip.Code == 2) Console.WriteLine("land!");
     }
 }
 ```
+
+`Execute` runs once per position at bind — the runtime measures every pair's contribution into per-tick delta tables, so `Apply` playback is a pure gather. `PlaySound` writes nothing to the channel; its contribution to the lane is zero, which keeps the measured arc clean — the events are pure side-effects decided by `frame.Clip`.
 
 **`IBake<TConsumer, ...TContext>`** — attach reactions, fired by `Timeline.Bake`. The timeline component is attached by whoever owns the entity; each pair's bake adds the component that pair writes into:
 
@@ -86,37 +89,38 @@ public readonly struct AttachSound : IBake<PlaySound, World, Entity>
 
 One `Timeline.Bake(id, world, entity)` call walks **every** pair in the asset — `AttachJump` fires for the arc pair, `AttachSound` for the events pair — subset match, chain order, up to four contexts.
 
-## The entity — the coordinator model
+## The entity
 
 `TimelineComponent` is the link: `{ Reference, Position }` — reference to the baked asset plus the coordinator-owned tick. Spawn:
 
 ```csharp
+ushort jump = TimelineAsset.Load(File.ReadAllBytes("jump.tlb"));
+using var asset = TimelineAsset.Of(jump);          // keeps the reference alive
+
 var entity = world.Create();
-entity.Add(new TimelineComponent(jump.Reference));  // the timeline link, attached directly
-Timeline.Bake(jump.Index, world, entity);           // bakes attach JumpY + Sfx
+entity.Add(new TimelineComponent(asset.Reference)); // the timeline link, attached directly
+Timeline.Bake(jump, world, entity);                 // bakes attach JumpY + Sfx
 ```
 
 ## The frame
 
-`Timeline.Query<TTrack, TClip>(in component)` is a read-only view of that pair's frames at the entity's current position — iterate it and hand each frame to the consumer's `Execute`. The coordinator moves `Position` once per entity per frame via `Timeline.Step` — the only mutation:
+`Apply` does the frame work — it gathers the measured delta at the entity's `Position` into the component field; `Step` moves the position by the asset's own duration/looping. Both take spans — `new Span<T>(ref x)` views one component field as a column, so no marshalling:
 
 ```csharp
-foreach (var (entity, tl, y, sfx) in
-         world.Query<TimelineComponent, JumpY, Sfx>()
-              .EnumerateWithEntities<TimelineComponent, JumpY, Sfx>())
+foreach (var (_, c, y) in
+         world.Query<TimelineComponent, JumpY>()
+              .EnumerateWithEntities<TimelineComponent, JumpY>())
 {
-    ref var c = ref tl.Value;
-    foreach (var jumpFrame in Timeline.Query<JumpTrack, JumpClip>(in c))
-        MoveY.Execute(in jumpFrame, ref y.Value.Value);
-    foreach (var soundFrame in Timeline.Query<SoundTrack, SoundClip>(in c))
-        PlaySound.Execute(in soundFrame, ref sfx.Value.Value);
-    Timeline.Step(jump.Index, MemoryMarshal.CreateSpan(ref c.Position, 1), true);
+    ref var t = ref c.Value;
+    Timeline<JumpTrack, JumpClip>.Apply(
+        jump, new ReadOnlySpan<ushort>(in t.Position), true, new Span<float>(ref y.Value.Value));
+    Timeline.Step(jump, new Span<ushort>(ref t.Position), true);
 }
 ```
 
-- `Query` reads at the current position; `Step` moves it by the asset's own duration/looping — apply then move, once.
-- No column arrays, no per-entity ids — `TimelineComponent` holds the reference; the position is a field on it.
-- Pairs share one position: the same component feeds both queries — no double-stepping, ever.
+- `Apply` is read-only on `Position`; `Step` is the only mutation — once per entity per frame.
+- The asset lane aggregates every pair's measured contribution — tracks in one asset feed one channel; keep channels in separate assets when they must stay independent.
+- The same calls work over `EnumerateChunks` spans for bulk: cast `Span<Clock>` to `Span<ushort>` and the whole chunk applies in one gather — that's the throughput path.
 
 ## Run
 
@@ -127,10 +131,6 @@ dotnet run -c Release --no-build
 ```
 
 (`tlb` is the `Tl.Bake` dotnet tool — `dotnet tool install -g Tl.Bake --prerelease` once published, or `dotnet run --project <tl>/tools/Tl.Bake --` from a checkout.)
-
-## Bulk path
-
-When the same timeline type runs over thousands of entities, the column API is the throughput path: `Timeline<T,C>.Apply(ids, positions, effects)` gathers deltas over shared caller-owned columns, `Timeline.Step(ids, positions)` moves them once. Frent chunk spans feed it directly via `EnumerateChunks`. The per-entity `Query`/`Execute` model here is the flexible one — arbitrary consumers, events, mixed pairs — the column model is the SIMD one.
 
 ## Note on references
 
