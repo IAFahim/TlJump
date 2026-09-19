@@ -3,43 +3,27 @@ using Frent;
 using Tl;
 using TlJump;
 
-var game = new Game
-{
-    Jump = TimelineAsset.Of(TimelineAsset.Load(File.ReadAllBytes("jump.tlb"))),
-    Sound = TimelineAsset.Of(TimelineAsset.Load(File.ReadAllBytes("sound.tlb"))),
-};
+var jump = TimelineAsset.Of(TimelineAsset.Load(File.ReadAllBytes("jump.tlb")));
 
+using var world = new World();
 for (var i = 0; i < 4; i++)
 {
-    var entity = game.World.Create<Clock, JumpY, Sfx>(new Clock(0), new JumpY(), new Sfx());
-    Timeline.Bake(game.Jump.Index, game, entity);
-    Timeline.Bake(game.Sound.Index, game, entity);
+    var entity = world.Create();
+    entity.Add(new TimelineComponent(jump.Reference));
+    Timeline.Bake(jump.Index, world, entity);
 }
 
 for (var frame = 0; frame < 14; frame++)
 {
-    foreach (var (jumpTls, soundTls, clocks, jumps, sfxs) in
-             game.World.Query<JumpTl, SoundTl, Clock, JumpY, Sfx>()
-                  .EnumerateChunks<JumpTl, SoundTl, Clock, JumpY, Sfx>())
+    foreach (var (entity, tl, y, sfx) in
+             world.Query<TimelineComponent, JumpY, Sfx>()
+                  .EnumerateWithEntities<TimelineComponent, JumpY, Sfx>())
     {
-        var jumpIds = MemoryMarshal.Cast<JumpTl, ushort>(jumpTls);
-        var soundIds = MemoryMarshal.Cast<SoundTl, ushort>(soundTls);
-        var clockCol = MemoryMarshal.Cast<Clock, ushort>(clocks);
-        var jumpCol = MemoryMarshal.Cast<JumpY, float>(jumps);
-        var sfxCol = MemoryMarshal.Cast<Sfx, float>(sfxs);
-
-        Timeline<JumpTrack, JumpClip>.Apply(jumpIds, clockCol, true, jumpCol);
-        Timeline<SoundTrack, SoundClip>.Apply(soundIds, clockCol, true, sfxCol);
-        Timeline.Step(jumpIds, clockCol, true);
-
-        for (var k = 0; k < sfxCol.Length; k++)
-        {
-            if (sfxCol[k] == 1f) Console.WriteLine($"  entity {k}: jump!");
-            if (sfxCol[k] == 2f) Console.WriteLine($"  entity {k}: land!");
-            sfxCol[k] = 0f;
-        }
-        Console.Write($"frame {frame}: y =");
-        for (var k = 0; k < jumpCol.Length; k++) Console.Write($" {jumpCol[k]:F0}");
-        Console.WriteLine();
+        ref var c = ref tl.Value;
+        foreach (var jumpFrame in Timeline.Query<JumpTrack, JumpClip>(in c))
+            MoveY.Execute(in jumpFrame, ref y.Value.Value);
+        foreach (var soundFrame in Timeline.Query<SoundTrack, SoundClip>(in c))
+            PlaySound.Execute(in soundFrame, ref sfx.Value.Value);
+        Timeline.Step(jump.Index, MemoryMarshal.CreateSpan(ref c.Position, 1), true);
     }
 }
