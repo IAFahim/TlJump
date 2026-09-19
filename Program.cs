@@ -7,9 +7,12 @@ ushort jump = TimelineAsset.Load(File.ReadAllBytes("jump.tlb"));
 ushort sound = TimelineAsset.Load(File.ReadAllBytes("sound.tlb"));
 
 using var world = new World();
-Timeline.Bake(sound, world);
-var spec = new SpawnSpec(jump, sound);
-for (var i = 0; i < 4; i++) Timeline.Bake(jump, world, spec);
+for (var i = 0; i < 4; i++)
+{
+    var entity = world.Create<Clock, JumpY, Sfx>(new Clock(0), new JumpY(), new Sfx());
+    Timeline.Bake(jump, world, entity, new JumpTl(jump));
+    Timeline.Bake(sound, world, entity, new SoundTl(sound));
+}
 
 for (var frame = 0; frame < 14; frame++)
 {

@@ -7,7 +7,6 @@ A minimal tl × Frent consumer, split the way the library intends:
 - **Programmer** writes the `ITrack`/`IBake` structs and the frame loop; `Tl.Gen.CSharp` wires consumers and bakes at compile time.
 
 ```text
-sound timeline attached            ← IBake<PlaySound, World> fired by Timeline.Bake
   entity 0..3: jump!               ← SoundClip code 1 at tick 0
 frame 0: y = 3 3 3 3
 frame 1: y = 6 6 6 6
@@ -59,11 +58,10 @@ public readonly struct MoveY : ITrack<JumpTrack, JumpClip>
         => y += frame.Direction * frame.Clip.Height * frame.Track.Scale;
 }
 
-public readonly struct SpawnJumper : IBake<MoveY, World, SpawnSpec>
+public readonly struct AttachJump : IBake<MoveY, World, Entity, JumpTl>
 {
-    public static void Bake(MoveY consumer, World world, SpawnSpec spec)
-        => world.Create<JumpTl, SoundTl, Clock, JumpY, Sfx>(
-            new(spec.Jump), new(spec.Sound), new(0), new(), new());
+    public static void Bake(MoveY consumer, World world, Entity entity, JumpTl timeline)
+        => entity.Add(timeline);
 }
 ```
 
@@ -108,14 +106,15 @@ foreach (var (jumpTls, soundTls, clocks, jumps, sfxs) in
 
 ## Attaching — `IBake<TConsumer, ...TContext>`
 
-`Timeline.Bake(id, ctx0, ctx1, ...)` walks the asset's pairs and runs every bake whose declared context types are satisfied — subset match, chain order, up to four contexts:
+`Timeline.Bake(id, ctx0, ctx1, ...)` walks the asset's pairs and runs every bake whose declared context types are satisfied — subset match, chain order, up to four contexts. The component travels as a context, so the bake *attaches* it to an existing entity:
 
 ```csharp
-Timeline.Bake(sound, world);          // runs SoundAttached — IBake<PlaySound, World>
-Timeline.Bake(jump, world, spec);     // runs SpawnJumper — IBake<MoveY, World, SpawnSpec>
+var entity = world.Create<Clock, JumpY, Sfx>(new(0), new(), new());
+Timeline.Bake(jump,  world, entity, new JumpTl(jump));    // AttachJump  -> entity.Add(JumpTl)
+Timeline.Bake(sound, world, entity, new SoundTl(sound));  // AttachSound -> entity.Add(SoundTl)
 ```
 
-The bake is host-timed attachment: create entities, wire components, log — the warm path never sees it.
+The bake is host-timed attachment: the entity gets its plain components at `Create`, then each timeline's bake adds its link — the warm path never sees it.
 
 ## Note on references
 

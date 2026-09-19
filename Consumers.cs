@@ -15,19 +15,16 @@ public readonly struct PlaySound : ITrack<SoundTrack, SoundClip>
         => sfx += frame.Clip.Code;
 }
 
-public record struct SpawnSpec(ushort Jump, ushort Sound);
-
-public readonly struct SpawnJumper : IBake<MoveY, World, SpawnSpec>
+public readonly struct AttachJump : IBake<MoveY, World, Entity, JumpTl>
 {
-    public static void Bake(MoveY consumer, World world, SpawnSpec spec)
-        => world.Create<JumpTl, SoundTl, Clock, JumpY, Sfx>(
-            new JumpTl(spec.Jump), new SoundTl(spec.Sound), new Clock(0), new JumpY(), new Sfx());
+    public static void Bake(MoveY consumer, World world, Entity entity, JumpTl timeline)
+        => entity.Add(timeline);
 }
 
-public readonly struct SoundAttached : IBake<PlaySound, World>
+public readonly struct AttachSound : IBake<PlaySound, World, Entity, SoundTl>
 {
-    public static void Bake(PlaySound consumer, World world)
-        => Console.WriteLine("sound timeline attached");
+    public static void Bake(PlaySound consumer, World world, Entity entity, SoundTl timeline)
+        => entity.Add(timeline);
 }
 
 public struct JumpTl { public ushort Id; public JumpTl(ushort v) => Id = v; }
