@@ -2,17 +2,9 @@ using Tl;
 
 namespace TlJump;
 
-public struct TimelineIndex
-{
-    public readonly ushort Value;
-    public TimelineIndex(ushort value) => Value = value;
-}
+public record struct TimelineIndex(ushort Value);
 
-public struct TimelinePosition
-{
-    public ushort Value;
-    public TimelinePosition(ushort value) => Value = value;
-}
+public record struct TimelinePosition(ushort Value);
 
 public readonly record struct JumpClip(float Height);
 
