@@ -58,10 +58,10 @@ public readonly struct MoveY : ITrack<JumpTrack, JumpClip>
         => y += frame.Direction * frame.Clip.Height * frame.Track.Scale;
 }
 
-public readonly struct AttachJump : IBake<MoveY, World, Entity, JumpTl>
+public readonly struct AttachJump : IBake<MoveY, Game, Entity>
 {
-    public static void Bake(MoveY consumer, World world, Entity entity, JumpTl timeline)
-        => entity.Add(timeline);
+    public static void Bake(MoveY consumer, Game game, Entity entity)
+        => entity.Add(new JumpTl(game.Jump.Index));
 }
 ```
 
@@ -106,15 +106,15 @@ foreach (var (jumpTls, soundTls, clocks, jumps, sfxs) in
 
 ## Attaching — `IBake<TConsumer, ...TContext>`
 
-`Timeline.Bake(id, ctx0, ctx1, ...)` walks the asset's pairs and runs every bake whose declared context types are satisfied — subset match, chain order, up to four contexts. The component travels as a context, so the bake *attaches* it to an existing entity:
+`Timeline.Bake(id, ctx0, ctx1, ...)` walks the asset's pairs and runs every bake whose declared context types are satisfied — subset match, chain order, up to four contexts. Supply the game world and the entity — the bake knows which component it owns:
 
 ```csharp
-var entity = world.Create<Clock, JumpY, Sfx>(new(0), new(), new());
-Timeline.Bake(jump,  world, entity, new JumpTl(jump));    // AttachJump  -> entity.Add(JumpTl)
-Timeline.Bake(sound, world, entity, new SoundTl(sound));  // AttachSound -> entity.Add(SoundTl)
+var entity = game.World.Create<Clock, JumpY, Sfx>(new(0), new(), new());
+Timeline.Bake(game.Jump.Index,  game, entity);   // AttachJump  -> entity.Add(new JumpTl(game.Jump.Index))
+Timeline.Bake(game.Sound.Index, game, entity);   // AttachSound -> entity.Add(new SoundTl(game.Sound.Index))
 ```
 
-The bake is host-timed attachment: the entity gets its plain components at `Create`, then each timeline's bake adds its link — the warm path never sees it.
+The game world is a context — it holds the loaded `TimelineAsset`s, so a bake pulls its own id from `game.Jump`/`game.Sound` and attaches the component. The warm path never sees it.
 
 ## Note on references
 

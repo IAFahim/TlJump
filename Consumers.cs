@@ -3,6 +3,13 @@ using Tl;
 
 namespace TlJump;
 
+public sealed class Game
+{
+    public readonly World World = new();
+    public TimelineAsset Jump;
+    public TimelineAsset Sound;
+}
+
 public readonly struct MoveY : ITrack<JumpTrack, JumpClip>
 {
     public static void Execute(in Frame<JumpTrack, JumpClip> frame, ref float y)
@@ -15,16 +22,16 @@ public readonly struct PlaySound : ITrack<SoundTrack, SoundClip>
         => sfx += frame.Clip.Code;
 }
 
-public readonly struct AttachJump : IBake<MoveY, World, Entity, JumpTl>
+public readonly struct AttachJump : IBake<MoveY, Game, Entity>
 {
-    public static void Bake(MoveY consumer, World world, Entity entity, JumpTl timeline)
-        => entity.Add(timeline);
+    public static void Bake(MoveY consumer, Game game, Entity entity)
+        => entity.Add(new JumpTl(game.Jump.Index));
 }
 
-public readonly struct AttachSound : IBake<PlaySound, World, Entity, SoundTl>
+public readonly struct AttachSound : IBake<PlaySound, Game, Entity>
 {
-    public static void Bake(PlaySound consumer, World world, Entity entity, SoundTl timeline)
-        => entity.Add(timeline);
+    public static void Bake(PlaySound consumer, Game game, Entity entity)
+        => entity.Add(new SoundTl(game.Sound.Index));
 }
 
 public struct JumpTl { public ushort Id; public JumpTl(ushort v) => Id = v; }
