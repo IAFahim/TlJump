@@ -13,6 +13,7 @@ public readonly struct PlaySound : ITrack<SoundTrack, SoundClip>
 {
     public static void Execute(in Frame<SoundTrack, SoundClip> frame, ref float channel)
     {
+        if (frame.IsBackward) return; // side effects fire at bind; skip the rewind measurement pass
         if (frame.Clip.Code == 1) Console.WriteLine("jump!");
         if (frame.Clip.Code == 2) Console.WriteLine("land!");
     }

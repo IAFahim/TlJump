@@ -36,34 +36,37 @@ public readonly struct MoveY : ITrack<JumpTrack, JumpClip>
 }
 ```
 
-- `Execute` is the pair's job: `frame` exposes `Clip`, `Track`, `TimelineTick`, `Direction`, `Has(FrameFlags.X)`, `WithinClip`, `ClipLength`. It runs once per position at bind to build delta tables — playback is a pure gather, so keep `Execute` pure in `ref` output; side-effects fire at bind.
+- `Execute` is the pair's job: `frame` exposes `Clip`, `Track`, `TimelineTick`, `Direction`, `IsBackward`, `Has(FrameFlags.X)`, `WithinClip`, `ClipLength`. It runs once per position at bind to build delta tables — playback is a pure gather, so keep `Execute` pure in `ref` output; side-effects fire at bind. Bind measures every asset forward **and** backward (rewind lanes), so side-effecting consumers guard with `if (frame.IsBackward) return;` or they fire twice.
 - `IBlend<TClip>.Blend(first, second, factor, out result)` interpolates adjacent clips across transition windows — implement a real lerp (`a + (b-a)*factor`).
-- `IBake<TConsumer, T0..T3>` declares attach bakes; `Timeline.Bake(id, ctx...)` walks every pair in the asset and fires each bake whose context types are a subset of the args (chain order, cap 4). The pattern here: the entity owner adds `TimelineComponent` directly; each pair's bake adds the component that pair writes into (`AttachJump`→`JumpY`, `AttachSound`→`Sfx`).
+- `IBake<TConsumer, T0..T3>` declares attach bakes; `Timeline.Bake(id, ctx...)` walks every pair in the asset and fires each bake whose context types are a subset of the args (chain order, cap 4). The pattern here: the entity owner adds `TimelineIndex` + `TimelinePosition` directly; each pair's bake adds the component that pair writes into (`AttachJump`→`JumpY`, `AttachSound`→`Sfx`).
 
 ## Runtime shape
 
 ```csharp
-ushort jump = TimelineAsset.Load(File.ReadAllBytes("jump.tlb"));
-using var asset = TimelineAsset.Of(jump);            // pins the index so Reference stays valid
+ushort jump = TimelineAsset.Load(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "jump.tlb")));
+using var world = new World();
 
 var entity = world.Create();
-entity.Add(new TimelineComponent(asset.Reference));  // { Reference, Position }
-Timeline.Bake(jump, world, entity);                  // fires per-pair bakes
+entity.Add(new TimelineIndex(jump));      // which timeline (interned ushort — no pinned ref)
+entity.Add(new TimelinePosition(0));      // playback position
+Timeline.Bake(jump, world, entity);       // fires per-pair bakes → adds JumpY + Sfx
 
-foreach (var (_, c, y) in world.Query<TimelineComponent, JumpY>()
-                              .EnumerateWithEntities<TimelineComponent, JumpY>())
-{
-    ref var t = ref c.Value;
-    Timeline<JumpTrack, JumpClip>.Apply(jump,
-        new ReadOnlySpan<ushort>(in t.Position), true, new Span<float>(ref y.Value.Value));
-    Timeline.Step(jump, new Span<ushort>(ref t.Position), true);
-}
+foreach (var (ids, positions, jumps) in world.Query<TimelineIndex, TimelinePosition, JumpY>()
+                 .EnumerateChunks<TimelineIndex, TimelinePosition, JumpY>())
+    for (var i = 0; i < ids.Length; i++)
+    {
+        Timeline<JumpTrack, JumpClip>.Apply(ids[i].Value,
+            new ReadOnlySpan<ushort>(in positions[i].Value), true,
+            new Span<float>(ref jumps[i].Value));
+        Timeline.Step(ids[i].Value, new Span<ushort>(ref positions[i].Value), true);
+    }
 ```
 
 - `Apply` is read-only on positions and gathers the measured delta at `Position` into the effect span. `Step` advances `Position` once — apply then move, once per entity per frame.
-- Single-element spans come from `new Span<T>(ref field)` / `new ReadOnlySpan<T>(in field)` — no marshalling.
+- Single-element spans come from `new Span<T>(ref field)` / `new ReadOnlySpan<T>(in field)` over chunk-span elements — the span *is* the archetype storage, so there is no gather/scatter and no managed row buffers. Fields, not properties: `ref`/`in` bindings need variables.
+- `TimelineIndex`/`TimelinePosition` must be plain structs with public fields — primary-constructor parameters are not fields, so `struct S(int v);` has no `.Value` at all.
 - `Apply` measures the whole asset: every pair's `Execute` sums into one lane per asset. Tracks that must feed independent channels go in separate assets.
-- Frent's `EnumerateChunks<...>()` yields `Span<Component>` over archetype storage for the bulk path; `Ref<T>.Value` gives `ref T` for the per-entity path.
+- Frent's `EnumerateChunks<...>()` yields `Span<Component>` over archetype storage; the per-row single-span `Apply` keeps every entity independent (no row table to keep in sync with entity lifetimes).
 - `Entity.Add<T>(in T)` migrates the entity's archetype — valid for bake-time attachment.
 
 ## Verifying changes

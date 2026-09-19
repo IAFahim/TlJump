@@ -2,6 +2,18 @@ using Tl;
 
 namespace TlJump;
 
+public struct TimelineIndex
+{
+    public readonly ushort Value;
+    public TimelineIndex(ushort value) => Value = value;
+}
+
+public struct TimelinePosition
+{
+    public ushort Value;
+    public TimelinePosition(ushort value) => Value = value;
+}
+
 public readonly record struct JumpClip(float Height);
 
 public readonly record struct JumpTrack(float Scale) : IBlend<JumpClip>
