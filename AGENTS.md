@@ -15,11 +15,10 @@ TlJump is a minimal consumer of `tl` (the timeline library) hosted in Frent, sho
 ## Build, bake, run
 
 ```sh
-dotnet build -c Release
-dotnet run --project ../tl-237-step-apply/tools/Tl.Bake -- \
-    jump.json jump.tlb --assembly bin/Release/net10.0/TlJump.dll
-dotnet run -c Release --no-build
+dotnet run
 ```
+
+`BakeJumpTimeline` (AfterTargets=Build, incremental on `jump.json`+assembly) builds `Tl.Bake` and bakes `jump.json` into `$(OutDir)jump.tlb` — a plain build or IDE Run leaves the asset next to the executable.
 
 The csproj project-references `../tl-237-step-apply` (`Tl.Core`, `Tl.Gen.Tlb`, `Tl.Gen.CSharp` as an analyzer + its `.targets` import) because the `Apply`/`Step` surface is not yet on NuGet; it becomes `PackageReference` packages on release.
 
@@ -69,4 +68,4 @@ foreach (var (_, c, y) in world.Query<TimelineComponent, JumpY>()
 
 ## Verifying changes
 
-Rebuild → rebake `jump.tlb` → run. Expected output: `jump!`/`land!` at bind (sound execs during measure), then `y = 3, 6, 9, 6, 3, 0` looping.
+Rebuild → run. Expected output: `jump!`/`land!` at bind (sound execs during measure), then `y = 3, 6, 9, 6, 3, 0` looping.

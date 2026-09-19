@@ -124,13 +124,13 @@ foreach (var (_, c, y) in
 
 ## Run
 
+Build runs a `BakeJumpTimeline` MSBuild target: it builds `Tl.Bake`, then bakes `jump.json` straight into `$(OutDir)jump.tlb` — so `dotnet run` or the IDE Run button works in any configuration:
+
 ```sh
-dotnet build -c Release
-tlb jump.json jump.tlb --assembly bin/Release/net10.0/TlJump.dll
-dotnet run -c Release --no-build
+dotnet run
 ```
 
-(`tlb` is the `Tl.Bake` dotnet tool — `dotnet tool install -g Tl.Bake --prerelease` once published, or `dotnet run --project <tl>/tools/Tl.Bake --` from a checkout.)
+To bake by hand: `tlb jump.json jump.tlb --assembly bin/Debug/net10.0/TlJump.dll` (`tlb` is the `Tl.Bake` dotnet tool — `dotnet tool install -g Tl.Bake --prerelease` once published, or `dotnet run --project <tl>/tools/Tl.Bake --` from a checkout).
 
 ## Note on references
 
