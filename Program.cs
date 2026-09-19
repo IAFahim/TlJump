@@ -14,8 +14,11 @@ Timeline.Bake(jump, world, entity);
 
 for (var frame = 0; frame < 14; frame++)
 {
-    // the whole lane: one generic call — chunks cast in place, one fused Apply per chunk
-    world.Run<JumpTrack, JumpClip, TimelineIndex, TimelinePosition, JumpY>();
+    // the whole lane: chunk spans straight into tl — Lane marshalls the columns itself
+    foreach (var (ids, timelinePosition, jumps) in world
+                 .Query<TimelineIndex, TimelinePosition, JumpY>()
+                 .EnumerateChunks<TimelineIndex, TimelinePosition, JumpY>())
+        Lane<JumpTrack, JumpClip>.Apply(ids, timelinePosition, true, jumps);
 
     foreach (var jumpY in world.Query<JumpY>().Enumerate<JumpY>())
         Console.WriteLine($"frame {frame}: y = {jumpY.Item1.Value.Value:F0}");

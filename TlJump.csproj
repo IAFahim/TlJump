@@ -12,7 +12,6 @@
   <ItemGroup>
     <PackageReference Include="Frent" Version="0.8.0-beta" />
     <ProjectReference Include="../tl/src/Tl.Core/Tl.Core.csproj" />
-    <ProjectReference Include="../tl/src/Tl.Frent/Tl.Frent.csproj" />
     <ProjectReference Include="../tl/tools/Tl.Gen.Tlb/Tl.Gen.Tlb.csproj" />
     <ProjectReference Include="../tl/src/Tl.Gen.CSharp/Tl.Gen.CSharp.csproj" ReferenceOutputAssembly="false" OutputItemType="Analyzer" PrivateAssets="all" AdditionalProperties="TargetFramework=netstandard2.0" GlobalPropertiesToRemove="RuntimeIdentifier;SelfContained;PublishAot;PublishTrimmed" />
   </ItemGroup>
