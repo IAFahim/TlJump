@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Frent;
 using Tl;
 using TlJump;
@@ -17,15 +18,18 @@ for (var frame = 0; frame < 14; frame++)
                  .Query<TimelineIndex, TimelinePosition, JumpY>()
                  .EnumerateChunks<TimelineIndex, TimelinePosition, JumpY>())
     {
-        for (var i = 0; i < ids.Length; i++)
-        {
-            // per-row apply over component fields: single-element spans wrap the
-            // archetype storage itself — no gather/scatter, no managed buffers
-            Timeline<JumpTrack, JumpClip>.Apply(ids[i].Value,
-                new ReadOnlySpan<ushort>(in positions[i].Value), true,
-                new Span<float>(ref jumps[i].Value));
-            Timeline.Step(ids[i].Value, new Span<ushort>(ref positions[i].Value), true);
-            Console.WriteLine($"frame {frame}: y = {jumps[i].Value:F0}");
-        }
+        // the archetype spans ARE tl's row columns: cast in place,
+        // one Apply + one Step for the whole chunk
+        Timeline<JumpTrack, JumpClip>.Apply(
+            MemoryMarshal.Cast<TimelineIndex, ushort>(ids),
+            MemoryMarshal.Cast<TimelinePosition, ushort>(positions),
+            true,
+            MemoryMarshal.Cast<JumpY, float>(jumps));
+        Timeline.Step(
+            MemoryMarshal.Cast<TimelineIndex, ushort>(ids),
+            MemoryMarshal.Cast<TimelinePosition, ushort>(positions),
+            true);
+        if (jumps.Length != 0) // empty archetypes the entity migrated through still match the query shape
+            Console.WriteLine($"frame {frame}: y = {jumps[0].Value:F0}");
     }
 }
