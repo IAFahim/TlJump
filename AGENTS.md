@@ -64,4 +64,4 @@ world.Run<JumpTrack, JumpClip, TimelineIndex, TimelinePosition, JumpY>();
 
 ## Verifying changes
 
-Rebuild → run. Expected output: `jump!`/`land!` at bind (sound execs during measure), then the playback loop asserts `y = 3, 6, 9, 6, 3, 0` looping over the 14 frames and prints `ok`; a wrong frame throws and `dotnet run` exits non-zero.
+Rebuild → `dotnet run` plays the demo: `jump!`/`land!` at bind (sound execs during measure), then `y = 3, 6, 9, 6, 3, 0` looping over 14 frames. `dotnet run -- --verify` runs the same loop as the repository's check: it asserts the golden sequence frame by frame, throws on the first wrong frame (non-zero exit), and prints `ok`.
