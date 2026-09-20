@@ -8,7 +8,7 @@ TlJump is a minimal consumer of `tl` (the timeline library) hosted in Frent, sho
 |---|---|
 | `jump.json` | designer data — one timeline (`name`, `duration`, `loop`), `tracks` name the game's C# namespace/type, `clips` name type + half-open `[start, end)` windows + `data` matching the struct fields |
 | `Timelines.cs` | programmer pairs — `JumpTrack`/`JumpClip`, `SoundTrack`/`SoundClip` record structs; tracks implement `IBlend<TClip>` |
-| `Consumers.cs` | `ITrack<TTrack, TClip>.OnActive` jobs + `IBake<TConsumer, ...TContext>` attach bakes + plain components (`JumpY`, `Sfx`) |
+| `Consumers.cs` | `ITrack<TTrack, TClip>.OnActive` jobs + `IBake<TConsumer>` attach bakes + plain components (`JumpY`, `Sfx`) |
 | `Program.cs` | load, spawn, frame loop |
 | `jump.tlb` | baked bytes — produced by `tlb`, regenerated on rebuild |
 
@@ -38,7 +38,7 @@ public readonly struct MoveY : ITrack<JumpTrack, JumpClip>
 
 - `OnActive` is the pair's job: `frame` exposes `Clip`, `Track`, `TimelineTick`, `Direction`, `IsBackward`, `Has(FrameFlags.X)`, `WithinClip`, `ClipLength`. It runs once per position at bind to build delta tables — playback is a pure gather, so keep `OnActive` pure in `ref` output; side-effects fire at bind. Bind measures every asset forward **and** backward (rewind lanes), so side-effecting consumers guard with `if (frame.IsBackward) return;` or they fire twice.
 - `IBlend<TClip>.Blend(first, second, factor, out result)` interpolates adjacent clips across transition windows — implement a real lerp (`a + (b-a)*factor`).
-- `IBake<TConsumer, T0..T3>` declares attach bakes; `Timeline.Bake(id, ctx...)` walks every pair in the asset and fires each bake whose context types are a subset of the args (chain order, cap 4). The pattern here: the entity owner adds `TimelineIndex` + `TimelinePosition` directly; each pair's bake adds the component that pair writes into (`AttachJump`→`JumpY`, `AttachSound`→`Sfx`).
+- `IBake<TConsumer>` declares attach bakes; the marker is arity-1 and the `Bake` method's parameter list is the whole contract — by value, `in`, or `ref`, any types, and a parameter whose type is exactly the consumer type receives the registered consumer instance. `Timeline.Bake(id, args...)` walks every pair in the asset and fires each bake whose parameter types are covered by the args plus the consumer instance (chain order, cap 4). The pattern here: the entity owner adds `TimelineIndex` + `TimelinePosition` directly; each pair's bake adds the component that pair writes into (`AttachJump`→`JumpY`, `AttachSound`→`Sfx`).
 
 ## Runtime shape
 
