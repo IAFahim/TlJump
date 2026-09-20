@@ -5,13 +5,13 @@ namespace TlJump;
 
 public readonly struct MoveY : ITrack<JumpTrack, JumpClip>
 {
-    public static void Execute(in Frame<JumpTrack, JumpClip> frame, ref float y)
-        => y += frame.Clip.Height * frame.Track.Scale;
+    public static void OnActive(in Frame<JumpTrack, JumpClip> frame, ref float y)
+        => y += frame.Direction * frame.Clip.Height * frame.Track.Scale;
 }
 
 public readonly struct PlaySound : ITrack<SoundTrack, SoundClip>
 {
-    public static void Execute(in Frame<SoundTrack, SoundClip> frame, ref float channel)
+    public static void OnActive(in Frame<SoundTrack, SoundClip> frame, ref float channel)
     {
         if (frame.IsBackward) return; // side effects fire at bind; skip the rewind measurement pass
         if (frame.Clip.Code == 1) Console.WriteLine("jump!");
