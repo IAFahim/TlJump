@@ -12,14 +12,19 @@ entity.Add(new TimelinePosition(0));
 
 Timeline.Bake(jump, world, entity);
 
+
 for (var frame = 0; frame < 14; frame++)
 {
-    // the whole lane: chunk spans straight into tl — Lane marshalls the columns itself
+    PlayFrame(world);
+}
+
+static void PlayFrame(World world)
+{
     foreach (var (ids, timelinePosition, jumps) in world
                  .Query<TimelineIndex, TimelinePosition, JumpY>()
                  .EnumerateChunks<TimelineIndex, TimelinePosition, JumpY>())
-        Lane<JumpTrack, JumpClip>.Apply(ids, timelinePosition, true, jumps);
-
-    foreach (var jumpY in world.Query<JumpY>().Enumerate<JumpY>())
-        Console.WriteLine($"frame {frame}: y = {jumpY.Item1.Value.Value:F0}");
+    {
+        Timeline<JumpTrack, JumpClip>.Apply(ids, timelinePosition, true, jumps);
+        Timeline<JumpTrack, JumpClip>.Advance(ids, timelinePosition, true);
+    }
 }
