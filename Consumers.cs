@@ -13,7 +13,7 @@ public readonly struct PlaySound : ITrack<SoundTrack, SoundClip>
 {
     public static void OnActive(in Frame<SoundTrack, SoundClip> frame, ref float channel)
     {
-        if (frame.IsBackward) return; // side effects fire at bind; skip the rewind measurement pass
+        if (frame.IsBackward) return;
         if (frame.Clip.Code == 1) Console.WriteLine("jump!");
         if (frame.Clip.Code == 2) Console.WriteLine("land!");
     }
@@ -29,7 +29,7 @@ public readonly struct AttachJump : IBake<MoveY>
 
 public readonly struct AttachSound : IBake<PlaySound>
 {
-    public static void Bake(PlaySound consumer, in World world, ref Entity entity)
+    public static void Bake(in World world, ref Entity entity)
         => entity.Add(new Sfx());
 }
 
