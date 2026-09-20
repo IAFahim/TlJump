@@ -19,15 +19,17 @@ public readonly struct PlaySound : ITrack<SoundTrack, SoundClip>
     }
 }
 
-public readonly struct AttachJump : IBake<MoveY, World, Entity>
+public readonly struct AttachJump : IBake<MoveY>
 {
-    public static void Bake(MoveY consumer, World world, Entity entity)
-        => entity.Add(new JumpY());
+    public static void Bake(in World world, ref Entity entity)
+    {
+        entity.Add(new JumpY());
+    }
 }
 
-public readonly struct AttachSound : IBake<PlaySound, World, Entity>
+public readonly struct AttachSound : IBake<PlaySound>
 {
-    public static void Bake(PlaySound consumer, World world, Entity entity)
+    public static void Bake(PlaySound consumer, in World world, ref Entity entity)
         => entity.Add(new Sfx());
 }
 
