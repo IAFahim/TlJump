@@ -5,8 +5,8 @@ namespace TlJump;
 
 public readonly struct MoveY : ITrack<JumpTrack, JumpClip>
 {
-    public static void OnActive(in Frame<JumpTrack, JumpClip> frame, ref float y)
-        => y += frame.Direction * frame.Clip.Height * frame.Track.Scale;
+    public static void OnMemo(in Frame<JumpTrack, JumpClip> frame, out float y)
+        => y = frame.Direction * frame.Clip.Height * frame.Track.Scale;
 }
 
 public readonly struct PlaySound : ITrack<SoundTrack, SoundClip>
