@@ -11,7 +11,7 @@ public readonly struct MoveY : ITrack<JumpTrack, JumpClip>
 
 public readonly struct PlaySound : ITrack<SoundTrack, SoundClip>
 {
-    public static void OnActive(in Frame<SoundTrack, SoundClip> frame, ref float channel)
+    public static void OnActive(in Frame<SoundTrack, SoundClip> frame)
     {
         if (frame.IsBackward) return;
         if (frame.Clip.Code == 1) Console.WriteLine("jump!");

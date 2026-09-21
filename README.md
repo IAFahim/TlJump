@@ -7,14 +7,11 @@ A minimal tl × Frent consumer, split the way the library intends:
 - **Programmer** writes the `ITrack`/`IBake` structs and the per-entity loop; `Tl.Gen.CSharp` wires consumers and bakes at compile time.
 
 ```text
-jump!                            ← PlaySound.Execute ran at bind (takeoff clip, code 1)
-land!                            ← touchdown clip, code 2
-frame 0: y = 3
-frame 1: y = 6
-frame 2: y = 9                   ← arc peak
-frame 3: y = 6
-frame 4: y = 3
-frame 5: y = 0                   ← wraps, loops
+jump!                            ← frame 0: takeoff clip (code 1), position enters its window
+land!                            ← frame 5: touchdown clip (code 2)
+jump!                            ← frame 6: loop wrapped to the takeoff tick
+land!                            ← frame 11
+jump!                            ← frame 12
 ```
 
 ## The split
@@ -50,26 +47,32 @@ public readonly record struct JumpTrack(float Scale) : IBlend<JumpClip>
 
 `IBlend` interpolates adjacent clips inside transition windows — return a real lerp.
 
-**`Consumers.cs`** — the jobs. `ITrack<TTrack, TClip>.Execute(in frame, ref effect)` is the pair's job — the frame carries `Clip`, `Track`, `TimelineTick`, `Direction`, and flags, so the consumer works from authored data:
+**`Consumers.cs`** — the jobs. `ITrack<TTrack, TClip>.OnActive` is the pair's job — the frame carries `Clip`, `Track`, `TimelineTick`, `Direction`, and flags, so the consumer works from authored data:
 
 ```csharp
 public readonly struct MoveY : ITrack<JumpTrack, JumpClip>
 {
-    public static void Execute(in Frame<JumpTrack, JumpClip> frame, ref float y)
+    public static void OnActive(in Frame<JumpTrack, JumpClip> frame, ref float y)
         => y += frame.Direction * frame.Clip.Height * frame.Track.Scale;
 }
 
 public readonly struct PlaySound : ITrack<SoundTrack, SoundClip>
 {
-    public static void Execute(in Frame<SoundTrack, SoundClip> frame, ref float channel)
+    public static void OnActive(in Frame<SoundTrack, SoundClip> frame)
     {
+        if (frame.IsBackward) return;
         if (frame.Clip.Code == 1) Console.WriteLine("jump!");
         if (frame.Clip.Code == 2) Console.WriteLine("land!");
     }
 }
 ```
 
-`Execute` runs once per position at bind — the runtime measures every pair's contribution into per-tick delta tables, so `Apply` playback is a pure gather. `PlaySound` writes nothing to the channel; its contribution to the lane is zero, which keeps the measured arc clean — the events are pure side-effects decided by `frame.Clip`.
+Two consumer shapes, decided by the parameter list:
+
+- `OnActive(in frame, ref float y)` — declares a gameplay column. It runs once per position when the pair folds (first use), measuring the pair's contribution into per-tick delta tables; the 4-argument `Apply` then plays back as a pure gather. Keep it pure in `ref` output — measure runs forward **and** backward, so a side-effect here would fire at fold, twice.
+- `OnActive(in frame)` — no gameplay slots, pure side-effect. It is dispatch-only: never runs at fold, contributes nothing to tables. The 3-argument `Apply(ids, positions, forward)` fires it once per row at each position's tick, in clip order, `IsBackward` set on rewind — that's what makes `PlaySound` print during playback.
+
+Each `Timeline<TTrack, TClip>` plays only its own pair: folding the jump pair never runs the sound pair's consumers, and the sound pair's `Apply` never touches the jump lane's tables.
 
 **`IBake<TConsumer, ...TContext>`** — attach reactions, fired by `Timeline.Bake`. The timeline component is attached by whoever owns the entity; each pair's bake adds the component that pair writes into:
 
@@ -104,7 +107,7 @@ Timeline.Bake(jump, world, entity);                 // bakes attach JumpY + Sfx
 
 ## The frame
 
-`Apply` does the frame work — it gathers the measured delta at the entity's `Position` into the component field; `Step` moves the position by the asset's own duration/looping. Both take spans — `new Span<T>(ref x)` views one component field as a column, so no marshalling:
+`Apply` does the frame work — the 4-arg form gathers the measured delta at the entity's `Position` into the component field, and the 3-arg form fires the pair's no-output consumers at the position's tick; `Advance` moves the position by the asset's own duration/looping. Both take spans — `new Span<T>(ref x)` views one component field as a column, so no marshalling:
 
 ```csharp
 foreach (var (_, c, y) in
@@ -114,12 +117,13 @@ foreach (var (_, c, y) in
     ref var t = ref c.Value;
     Timeline<JumpTrack, JumpClip>.Apply(
         jump, new ReadOnlySpan<ushort>(in t.Position), true, new Span<float>(ref y.Value.Value));
-    Timeline.Step(jump, new Span<ushort>(ref t.Position), true);
+    Timeline<JumpTrack, JumpClip>.Advance(
+        jump, new Span<ushort>(ref t.Position), true);
 }
 ```
 
-- `Apply` is read-only on `Position`; `Step` is the only mutation — once per entity per frame.
-- The asset lane aggregates every pair's measured contribution — tracks in one asset feed one channel; keep channels in separate assets when they must stay independent.
+- `Apply` is read-only on `Position`; `Advance` is the only mutation — once per entity per frame.
+- Every pair folds its own lane and never runs another pair's consumers — pairs in one asset feed independent channels; the no-output `Apply` dispatches only the pair's own dispatch consumers.
 - The same calls work over `EnumerateChunks` spans for bulk: cast `Span<Clock>` to `Span<ushort>` and the whole chunk applies in one gather — that's the throughput path.
 
 ## Run
@@ -134,4 +138,4 @@ To bake by hand: `tlb jump.json jump.tlb --assembly bin/Debug/net10.0/TlJump.dll
 
 ## Note on references
 
-`Tl.Core` / `Tl.Gen.CSharp` / `Tl.Gen.Tlb` are project references because the `Apply`/`Step` surface is not yet published; on release they become `<PackageReference Include="Tl.CSharp" />` plus the `Tl.Gen.CSharp` analyzer package — the source stays identical.
+`Tl.Core` / `Tl.Gen.CSharp` / `Tl.Gen.Tlb` are project references because the `Apply`/`Advance` surface is not yet published; on release they become `<PackageReference Include="Tl.CSharp" />` plus the `Tl.Gen.CSharp` analyzer package — the source stays identical.

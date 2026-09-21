@@ -36,7 +36,7 @@ public readonly struct MoveY : ITrack<JumpTrack, JumpClip>
 }
 ```
 
-- `OnActive` is the pair's job: `frame` exposes `Clip`, `Track`, `TimelineTick`, `Direction`, `IsBackward`, `Has(FrameFlags.X)`, `WithinClip`, `ClipLength`. It runs once per position at bind to build delta tables — playback is a pure gather, so keep `OnActive` pure in `ref` output; side-effects fire at bind. Bind measures every asset forward **and** backward (rewind lanes), so side-effecting consumers guard with `if (frame.IsBackward) return;` or they fire twice.
+- `OnActive` is the pair's job: `frame` exposes `Clip`, `Track`, `TimelineTick`, `Direction`, `IsBackward`, `Has(FrameFlags.X)`, `WithinClip`, `ClipLength`. Two shapes by parameter list: `OnActive(in frame, ref T out)` declares a column — it runs once per position at fold to build delta tables, so keep it pure in `ref` output (fold measures forward **and** backward — guard side-effects with `if (frame.IsBackward) return;`). `OnActive(in frame)` with no gameplay slots is dispatch-only: it never runs at fold and fires per tick during playback through the no-output `Timeline<TTrack,TClip>.Apply(ids, positions, forward)`.
 - `IBlend<TClip>.Blend(first, second, factor, out result)` interpolates adjacent clips across transition windows — implement a real lerp (`a + (b-a)*factor`).
 - `IBake<TConsumer>` declares attach bakes; the marker is arity-1 and the `Bake` method's parameter list is the whole contract — by value, `in`, or `ref`, any types, and a parameter whose type is exactly the consumer type receives the registered consumer instance. `Timeline.Bake(id, args...)` walks every pair in the asset and fires each bake whose parameter types are covered by the args plus the consumer instance (chain order, cap 4). The pattern here: the entity owner adds `TimelineIndex` + `TimelinePosition` directly; each pair's bake adds the component that pair writes into (`AttachJump`→`JumpY`, `AttachSound`→`Sfx`).
 
@@ -58,10 +58,10 @@ world.Run<JumpTrack, JumpClip, TimelineIndex, TimelinePosition, JumpY>();
 - Under the hood the archetype spans ARE tl's row columns — no per-row loop, no copy, no managed row buffers.
 - `TimelineIndex`/`TimelinePosition` must have real storage of exactly 2 bytes: `record struct TimelineIndex(ushort Value);` (positional record parameters become stored properties — sizeof 2). The tempting `struct TimelineIndex(ushort value);` is a trap: plain-struct primary-constructor parameters are NOT fields, the struct has no instance state (sizeof 1), `MemoryMarshal.Cast` then halves the span length — a contract violation tl rejects in checked builds (`Column length must equal position count`); in a Release package it silently plays zeros. Plain structs with public fields also work (and are the only form that binds to `ref`/`in` single-element spans).
 - Empty archetypes the entity migrated through still match the query shape — `Apply`/`Advance` handle zero-length spans, but guard any direct indexing.
-- `Apply` measures the whole asset: every pair's `OnActive` sums into one lane per asset. Tracks that must feed independent channels go in separate assets.
+- `Apply` folds and plays only its own pair — folding the jump pair never runs the sound pair's consumers, and a pair's lane never gathers another pair's contribution. Pairs in one asset feed independent channels; `Timeline<SoundTrack, SoundClip>.Apply(ids, positions, true)` with no effects column dispatches the sound pair's dispatch-only consumers per tick.
 - Frent's `EnumerateChunks<...>()` yields `Span<Component>` over archetype storage; entities sharing an archetype share one contiguous chunk.
 - `Entity.Add<T>(in T)` migrates the entity's archetype — valid for bake-time attachment.
 
 ## Verifying changes
 
-Rebuild → `dotnet run` plays the demo: `jump!`/`land!` at bind (sound execs during measure), then `y = 3, 6, 9, 6, 3, 0` looping over 14 frames. `dotnet run -- --verify` runs the same loop as the repository's check: it asserts the golden sequence frame by frame, throws on the first wrong frame (non-zero exit), and prints `ok`.
+Rebuild → `dotnet run` plays the demo: `jump!` at frames 0/6/12 and `land!` at frames 5/11 — the takeoff/touchdown windows fire during playback, never at bind. There is no `--verify` harness in the current demo loop — verification is reading the printed sequence.
