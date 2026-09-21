@@ -11,7 +11,7 @@ public readonly struct MoveY : ITrack<JumpTrack, JumpClip>
 
 public readonly struct PlaySound : ITrack<SoundTrack, SoundClip>
 {
-    public static void OnActive(in Frame<SoundTrack, SoundClip> frame, ref float channel)
+    public static void OnActive(in Frame<SoundTrack, SoundClip> frame)
     {
         if (frame.IsBackward) return;
         if (frame.Clip.Code == 1) Console.WriteLine("jump!");
@@ -27,11 +27,4 @@ public readonly struct AttachJump : IBake<MoveY>
     }
 }
 
-public readonly struct AttachSound : IBake<PlaySound>
-{
-    public static void Bake(in World world, ref Entity entity)
-        => entity.Add(new Sfx());
-}
-
 public struct JumpY { public float Value; }
-public struct Sfx { public float Value; }
