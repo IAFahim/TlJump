@@ -25,6 +25,7 @@ static void PlayFrame(World world)
                  .EnumerateChunks<TimelineIndex, TimelinePosition, JumpY>())
     {
         Timeline<JumpTrack, JumpClip>.Apply(ids, timelinePosition, true, jumps);
+        Timeline<SoundTrack, SoundClip>.Apply(ids, timelinePosition, true);
         Timeline<JumpTrack, JumpClip>.Advance(ids, timelinePosition, true);
     }
 }
