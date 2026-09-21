@@ -8,7 +8,7 @@ TlJump is a minimal consumer of `tl` (the timeline library) hosted in Frent, sho
 |---|---|
 | `jump.json` | designer data — one timeline (`name`, `duration`, `loop`), `tracks` name the game's C# namespace/type, `clips` name type + half-open `[start, end)` windows + `data` matching the struct fields |
 | `Timelines.cs` | programmer pairs — `JumpTrack`/`JumpClip`, `SoundTrack`/`SoundClip` record structs; tracks implement `IBlend<TClip>` |
-| `Consumers.cs` | `ITrack<TTrack, TClip>.OnActive` jobs + `IBake<TConsumer>` attach bakes + plain components (`JumpY`, `Sfx`) |
+| `Consumers.cs` | `ITrack<TTrack, TClip>.OnActive` jobs (measured + dispatch shapes) + `IBake<TConsumer>` attach bakes + plain components (`JumpY`) |
 | `Program.cs` | load, spawn, frame loop |
 | `jump.tlb` | baked bytes — produced by `tlb`, regenerated on rebuild |
 
@@ -36,9 +36,9 @@ public readonly struct MoveY : ITrack<JumpTrack, JumpClip>
 }
 ```
 
-- `OnActive` is the pair's job: `frame` exposes `Clip`, `Track`, `TimelineTick`, `Direction`, `IsBackward`, `Has(FrameFlags.X)`, `WithinClip`, `ClipLength`. It runs once per position at bind to build delta tables — playback is a pure gather, so keep `OnActive` pure in `ref` output; side-effects fire at bind. Bind measures every asset forward **and** backward (rewind lanes), so side-effecting consumers guard with `if (frame.IsBackward) return;` or they fire twice.
+- `OnActive` is the pair's job, and its signature picks the lane (tl README "The two consumer shapes"): `frame` exposes `Clip`, `Track`, `TimelineTick`, `Direction`, `IsBackward`, `Has(FrameFlags.X)`, `WithinClip`, `ClipLength`. With a `ref float` output the consumer is **measured once** at first typed use (`duration × 2` runs over a scratch column) and frozen per `(asset, pair)` — keep it a pure function of the frame, accumulate the `ref` (it starts at 0f), and drive direction from `frame.Direction`; side effects there fire at fold and never during playback. With **no** `ref` the consumer is **live dispatch** — `Apply(ids, positions, forward)` runs it per row per frame; `PlaySound` is this shape (guarded by `frame.IsBackward` so rewind replays stay silent).
 - `IBlend<TClip>.Blend(first, second, factor, out result)` interpolates adjacent clips across transition windows — implement a real lerp (`a + (b-a)*factor`).
-- `IBake<TConsumer>` declares attach bakes; the marker is arity-1 and the `Bake` method's parameter list is the whole contract — by value, `in`, or `ref`, any types, and a parameter whose type is exactly the consumer type receives the registered consumer instance. `Timeline.Bake(id, args...)` walks every pair in the asset and fires each bake whose parameter types are covered by the args plus the consumer instance (chain order, cap 4). The pattern here: the entity owner adds `TimelineIndex` + `TimelinePosition` directly; each pair's bake adds the component that pair writes into (`AttachJump`→`JumpY`, `AttachSound`→`Sfx`).
+- `IBake<TConsumer>` declares attach bakes; the marker is arity-1 and the `Bake` method's parameter list is the whole contract — by value, `in`, or `ref`, any types, and a parameter whose type is exactly the consumer type binds `default(TConsumer)` (consumers are static). `Timeline.Bake(id, args...)` walks every pair in the asset and fires each bake whose parameter types are covered by the args (chain order, cap 4). The pattern here: the entity owner adds `TimelineIndex` + `TimelinePosition` directly; the arc pair's bake adds the component that pair writes into (`AttachJump`→`JumpY`). Dispatch consumers write no column, so the sound pair needs no component or bake.
 
 ## Runtime shape
 
@@ -49,19 +49,26 @@ using var world = new World();
 var entity = world.Create();
 entity.Add(new TimelineIndex(jump));      // which timeline (interned ushort — no pinned ref)
 entity.Add(new TimelinePosition(0));      // playback position
-Timeline.Bake(jump, world, entity);       // fires per-pair bakes → adds JumpY + Sfx
+Timeline.Bake(jump, world, entity);       // fires the arc pair's bake → adds JumpY
 
-world.Run<JumpTrack, JumpClip, TimelineIndex, TimelinePosition, JumpY>();
+foreach (var (ids, positions, jumps) in world
+             .Query<TimelineIndex, TimelinePosition, JumpY>()
+             .EnumerateChunks<TimelineIndex, TimelinePosition, JumpY>())
+{
+    Timeline<SoundTrack, SoundClip>.Apply(ids, positions, true);        // dispatch — live cues
+    Timeline<JumpTrack, JumpClip>.Apply(ids, positions, true, jumps);   // measured gather
+    Timeline<JumpTrack, JumpClip>.Advance(ids, positions, true);        // move the clock once
+}
 ```
 
-- `Timeline<JumpTrack, JumpClip>.Apply(ids, timelinePosition, true, jumps)` (from `Tl.Core`) is the gather half of the chunk: it marshalls the three component spans into tl's row columns itself (`MemoryMarshal.Cast`) and sums every pair's `OnActive` delta into the lane column — it is pure over `positions` and never moves the clock. `Timeline<JumpTrack, JumpClip>.Advance(ids, timelinePosition, true)` is the other half: it moves the clock once per frame, after every pair that reads the column has applied. Generic over structs, so the JIT specializes per instantiation — identical machine code to the handwritten cast loop. There is also a per-entity overload: `Timeline<,>.Apply(in index, ref position, forward, ref effect)` over single component values.
+- `Timeline<JumpTrack, JumpClip>.Apply(ids, timelinePosition, true, jumps)` (from `Tl.Core`) is the gather half of the chunk: it marshalls the three component spans into tl's row columns itself (`MemoryMarshal.Cast`) and sums every pair's measured `OnActive` delta into the lane column — it is pure over `positions` and never moves the clock. `Timeline<SoundTrack, SoundClip>.Apply(ids, positions, true)` (no effects column) is the dispatch half: it runs the sound pair's live `OnActive` once per row. `Timeline<JumpTrack, JumpClip>.Advance(ids, timelinePosition, true)` is the other half: it moves the clock once per frame, after every pair that reads the column has applied. Generic over structs, so the JIT specializes per instantiation — identical machine code to the handwritten cast loop. Per-entity overloads also exist: `Apply(in index, in position, forward, effects)` and `Advance(index, ref position, forward)` over single component values.
 - Under the hood the archetype spans ARE tl's row columns — no per-row loop, no copy, no managed row buffers.
 - `TimelineIndex`/`TimelinePosition` must have real storage of exactly 2 bytes: `record struct TimelineIndex(ushort Value);` (positional record parameters become stored properties — sizeof 2). The tempting `struct TimelineIndex(ushort value);` is a trap: plain-struct primary-constructor parameters are NOT fields, the struct has no instance state (sizeof 1), `MemoryMarshal.Cast` then halves the span length — a contract violation tl rejects in checked builds (`Column length must equal position count`); in a Release package it silently plays zeros. Plain structs with public fields also work (and are the only form that binds to `ref`/`in` single-element spans).
 - Empty archetypes the entity migrated through still match the query shape — `Apply`/`Advance` handle zero-length spans, but guard any direct indexing.
-- `Apply` measures the whole asset: every pair's `OnActive` sums into one lane per asset. Tracks that must feed independent channels go in separate assets.
+- The measured lane aggregates the whole asset: every pair's `ref` consumer sums into one effect column per asset. Tracks that must feed independent channels go in separate assets; dispatch consumers write nothing.
 - Frent's `EnumerateChunks<...>()` yields `Span<Component>` over archetype storage; entities sharing an archetype share one contiguous chunk.
 - `Entity.Add<T>(in T)` migrates the entity's archetype — valid for bake-time attachment.
 
 ## Verifying changes
 
-Rebuild → `dotnet run` plays the demo: `jump!`/`land!` at bind (sound execs during measure), then `y = 3, 6, 9, 6, 3, 0` looping over 14 frames. `dotnet run -- --verify` runs the same loop as the repository's check: it asserts the golden sequence frame by frame, throws on the first wrong frame (non-zero exit), and prints `ok`.
+Rebuild → `dotnet run` plays the demo: `jump!` at frames 0/6/12 and `land!` at 5/11 (dispatch cues fire live when the row sits on the clip tick), `y = 3, 6, 9, 6, 3, 0` looping over 14 frames. `dotnet run -- --verify` runs the same loop as the repository's check: it asserts the golden sequence frame by frame, throws on the first wrong frame (non-zero exit), and prints `ok`.
