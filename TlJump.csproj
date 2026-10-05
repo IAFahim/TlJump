@@ -5,17 +5,18 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <TlRoot Condition="'$(TlRoot)' == ''">../tl</TlRoot>
     <_TlDotNet Condition="'$(DotNetHostPath)' != ''">$(DotNetHostPath)</_TlDotNet>
     <_TlDotNet Condition="'$(_TlDotNet)' == ''">dotnet</_TlDotNet>
-    <_TlBakeProject>../tl/tools/Tl.Bake/Tl.Bake.csproj</_TlBakeProject>
+    <_TlBakeProject>$(TlRoot)/tools/Tl.Bake/Tl.Bake.csproj</_TlBakeProject>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Frent" Version="0.8.0-beta" />
-    <ProjectReference Include="../tl/src/Tl.Core/Tl.Core.csproj" />
-    <ProjectReference Include="../tl/tools/Tl.Gen.Tlb/Tl.Gen.Tlb.csproj" />
-    <ProjectReference Include="../tl/src/Tl.Gen.CSharp/Tl.Gen.CSharp.csproj" ReferenceOutputAssembly="false" OutputItemType="Analyzer" PrivateAssets="all" AdditionalProperties="TargetFramework=netstandard2.0" GlobalPropertiesToRemove="RuntimeIdentifier;SelfContained;PublishAot;PublishTrimmed" />
+    <ProjectReference Include="$(TlRoot)/src/Tl.Core/Tl.Core.csproj" />
+    <ProjectReference Include="$(TlRoot)/tools/Tl.Gen.Tlb/Tl.Gen.Tlb.csproj" />
+    <ProjectReference Include="$(TlRoot)/src/Tl.Gen.CSharp/Tl.Gen.CSharp.csproj" ReferenceOutputAssembly="false" OutputItemType="Analyzer" PrivateAssets="all" AdditionalProperties="TargetFramework=netstandard2.0" GlobalPropertiesToRemove="RuntimeIdentifier;SelfContained;PublishAot;PublishTrimmed" />
   </ItemGroup>
-  <Import Project="../tl/src/Tl.Gen.CSharp/build/Tl.Gen.CSharp.targets" />
+  <Import Project="$(TlRoot)/src/Tl.Gen.CSharp/build/Tl.Gen.CSharp.targets" />
   <Target Name="BakeJumpTimeline"
           AfterTargets="Build"
           Inputs="$(MSBuildProjectDirectory)/jump.json;$(TargetPath)"
