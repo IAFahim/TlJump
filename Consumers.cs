@@ -5,12 +5,12 @@ namespace TlJump;
 
 public readonly struct MoveY : ITrack<JumpTrack, JumpClip>
 {
-    public static void OnMemo(in Frame<JumpTrack, JumpClip> frame, out float arc)
+    public static void Fold(in Frame<JumpTrack, JumpClip> frame, out float arc)
     {
-        arc = frame.Direction * frame.Clip.Height;
+        arc = frame.Direction * frame.Clip.Height * frame.Track.Scale;
     }
 
-    public static void OnActive(in float arc, ref JumpY y, in JumpPower power)
+    public static void ExecuteActive(in float arc, ref JumpY y, in JumpPower power)
     {
         y.Value += arc * power.Value;
         Console.WriteLine(y.Value);
@@ -19,7 +19,7 @@ public readonly struct MoveY : ITrack<JumpTrack, JumpClip>
 
 public readonly struct PlaySound : ITrack<SoundTrack, SoundClip>
 {
-    public static void OnActive(in Frame<SoundTrack, SoundClip> frame)
+    public static void ExecuteActive(in Frame<SoundTrack, SoundClip> frame)
     {
         if (frame.IsBackward) return;
         if (frame.Clip.Code == 1) Console.WriteLine("jump!");

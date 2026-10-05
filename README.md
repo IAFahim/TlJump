@@ -7,14 +7,14 @@ A minimal tl × Frent consumer, split the way the library intends:
 - **Programmer** writes the `ITrack`/`IBake` structs and the per-entity loop; `Tl.Gen.CSharp` wires consumers and bakes at compile time.
 
 ```text
+6                                ← MoveY.ExecuteActive wrote JumpY (arc 3 × JumpPower 2)
 jump!                            ← PlaySound dispatched live at position 0 (takeoff clip, code 1)
-frame 0: y = 3
-frame 1: y = 6
-frame 2: y = 9                   ← arc peak
-frame 3: y = 6
-frame 4: y = 3
-land!                            ← touchdown clip, code 2
-frame 5: y = 0                   ← wraps, loops
+12                               ← frame 1
+18                               ← frame 2, arc peak
+12                               ← frame 3
+6                                ← frame 4
+0                                ← frame 5
+land!                            ← touchdown clip, code 2 — then the loop wraps and repeats
 ```
 
 ## The split
@@ -50,20 +50,25 @@ public readonly record struct JumpTrack(float Scale) : IBlend<JumpClip>
 
 `IBlend` interpolates adjacent clips inside transition windows — return a real lerp.
 
-**`Consumers.cs`** — the jobs, and here the consumer signature picks the lane (the tl README calls this "the two consumer shapes"):
+**`Consumers.cs`** — the jobs. A consumer declares `Fold` and/or `ExecuteActive`, and the signatures pick the contract:
 
 ```csharp
 public readonly struct MoveY : ITrack<JumpTrack, JumpClip>
 {
-    // ref shape — measured once per (asset, pair) at first typed use, then frozen:
-    public static void OnActive(in Frame<JumpTrack, JumpClip> frame, ref float y)
-        => y += frame.Direction * frame.Clip.Height * frame.Track.Scale;
+    // Fold — measured once per (asset, pair) at first typed use, then frozen per tick:
+    public static void Fold(in Frame<JumpTrack, JumpClip> frame, out float arc)
+        => arc = frame.Direction * frame.Clip.Height * frame.Track.Scale;
+
+    // ExecuteActive — runs live per row; the 'in float arc' feed binds the Fold
+    // result by type, 'ref'/'in' params bind caller columns by type:
+    public static void ExecuteActive(in float arc, ref JumpY y, in JumpPower power)
+        => y.Value += arc * power.Value;
 }
 
 public readonly struct PlaySound : ITrack<SoundTrack, SoundClip>
 {
-    // dispatch shape — runs live, once per row per frame, never folded:
-    public static void OnActive(in Frame<SoundTrack, SoundClip> frame)
+    // dispatch-only shape — frame only, no columns; runs live once per row per frame:
+    public static void ExecuteActive(in Frame<SoundTrack, SoundClip> frame)
     {
         if (frame.IsBackward) return;
         if (frame.Clip.Code == 1) Console.WriteLine("jump!");
@@ -72,51 +77,59 @@ public readonly struct PlaySound : ITrack<SoundTrack, SoundClip>
 }
 ```
 
-- **`ref float` shape is measured, not executed.** At the first typed `Apply`/`Advance`/`View` of `(asset, pair)`, tl runs it once per tick in both directions over a scratch column, stores one float per tick and direction, and replays that table for every row forever. Keep it a pure function of `frame` (`Clip`, `Track`, `TimelineTick`, `Flags`); the `ref` starts from zero each probe, so accumulate — never read it. Side effects here fire `duration × 2` times at fold and never during playback.
-- **No-`ref` shape is live dispatch.** `Apply(ids, positions, forward)` (no effects column) runs it once per row per frame — the place for audio cues, logs, and reads of live host state. It sees only the frame — no row or entity column — so entity-correlated work stays host-side.
+- **`Fold` is measured, not executed.** At the first typed `Apply`/`Advance`/`View` of `(asset, pair)`, tl runs it once per tick in both directions, stores the `out` results per tick and direction, and replays that table for every row forever. Keep it a pure function of `frame` (`Clip`, `Track`, `TimelineTick`, `Flags`) — side effects fire `duration × 2` times at fold and never during playback.
+- **`ExecuteActive` is the live half.** Leading `in` parameters whose types match the `Fold` results are memo feeds — the runtime injects the folded value for that row's position; remaining `in`/`ref` parameters are gameplay columns the caller supplies through a `ColumnSet`, bound by `TypeKey` (two same-type columns can't be distinguished — give them distinct types). `ExecuteActive(in frame)` with no columns is dispatch-only — the place for audio cues, logs, and reads of live host state; it sees only the frame, so entity-correlated work stays host-side.
 
 **`IBake<TConsumer>`** — attach reactions, fired by `Timeline.Bake`. The `Bake` signature is the contract — by value, `in`, or `ref`, any types; a parameter typed exactly `TConsumer` binds `default` (consumers are static):
 
 ```csharp
 public readonly struct AttachJump : IBake<MoveY>
 {
-    public static void Bake(in World world, ref Entity entity)
-        => entity.Add(new JumpY());
+    public static void Bake(ref Span<Entity> entities)
+    {
+        foreach (ref var entity in entities) entity.Add(new JumpY());
+    }
 }
 ```
 
-One `Timeline.Bake(id, world, entity)` call walks **every** pair in the asset and fires each bake whose parameter types are covered by the arguments — subset match, chain order, up to four state arguments.
+One `Timeline.Bake(id, args...)` call walks **every** pair in the asset and fires each bake whose parameter types are covered by the arguments — subset match, chain order, up to four state arguments.
 
 ## The entity
 
 `TimelineIndex` + `TimelinePosition` are the link — which interned timeline, and where in it — two `ushort`-sized record structs with real stored fields:
 
 ```csharp
-ushort jump = TimelineAsset.Load(File.ReadAllBytes("jump.tlb"));
+ushort jump = TimelineAsset.Load(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "jump.tlb")));
 
-var entity = world.Create();
-entity.Add(new TimelineIndex(jump));      // which timeline
-entity.Add(new TimelinePosition(0));      // playback position
-Timeline.Bake(jump, world, entity);       // fires AttachJump → adds JumpY
+Span<Entity> spawns =
+[
+    world.Create(new TimelineIndex(jump), new TimelinePosition(0), new JumpPower { Value = 2 }),
+];
+Timeline.Bake(jump, spawns);              // fires AttachJump → adds JumpY
 ```
 
 ## The frame
 
-`Apply` does the frame work — it gathers the measured delta at each row's position into the effect column, and dispatches live consumers — and `Advance` moves the position by the asset's own duration/looping. The archetype spans **are** tl's row columns — `MemoryMarshal.Cast` inside the generic overloads, no copy, no marshalling:
+`Apply` does the frame work — it injects the folded values at each row's position into the consumers' memo feeds and runs `ExecuteActive` over the caller's columns — and `Advance` moves the position by the asset's own duration/looping. The archetype spans **are** tl's row columns — `MemoryMarshal.Cast` inside the generic overloads, no copy, no marshalling. Columns ride in a `ColumnSet` the caller assembles per chunk:
 
 ```csharp
-foreach (var (ids, positions, jumps) in world
-             .Query<TimelineIndex, TimelinePosition, JumpY>()
-             .EnumerateChunks<TimelineIndex, TimelinePosition, JumpY>())
+foreach (var (ids, positions, y, powers) in world
+             .Query<TimelineIndex, TimelinePosition, JumpY, JumpPower>()
+             .EnumerateChunks<TimelineIndex, TimelinePosition, JumpY, JumpPower>())
 {
-    Timeline<SoundTrack, SoundClip>.Apply(ids, positions, true);        // dispatch — live cues
-    Timeline<JumpTrack, JumpClip>.Apply(ids, positions, true, jumps);   // measured gather
-    Timeline<JumpTrack, JumpClip>.Advance(ids, positions, true);        // move the clock once
+    if (ids.Length == 0) continue;
+    var set = new ColumnSet();
+    set.Add(y);                                   // ref column — bound to 'ref JumpY'
+    set.Add(powers);                              // in column — bound to 'in JumpPower'
+    Timeline<JumpTrack, JumpClip>.Apply(ids, positions, true, in set);
+    Timeline<SoundTrack, SoundClip>.Apply(ids, positions, true);  // dispatch — live cues
+    Timeline<JumpTrack, JumpClip>.Advance(ids, positions, true);  // move the clock once
 }
 ```
 
 - `Apply` is read-only on the clock; `Advance` is the only mutation — once per row per frame, after every pair has applied.
-- The measured lane aggregates every pair's `ref` consumer into one effect column per asset — tracks that must feed independent channels go in separate assets.
+- `ColumnSet.Add(ReadOnlySpan<T>)` binds by `TypeKey` — the runtime routes each column to the `in`/`ref` parameter of matching type; the set must cover every gameplay column the pair's consumers declare (memo feeds come from the fold tables, not the set).
+- A single effect column can skip the set: `Apply(ids, positions, forward, Span<float> fx)` applies a frozen fold lane directly; `ApplyChunk` covers two typed lanes.
 - `TimelineIndex`/`TimelinePosition` must be exactly 2 bytes of stored state: `record struct TimelineIndex(ushort Value);` works (positional parameters become stored properties); a plain `struct TimelineIndex(ushort value);` does **not** (primary-constructor parameters aren't fields — sizeof 1, and the span cast halves the row count; checked builds reject it).
 
 ## Run
@@ -126,8 +139,6 @@ Build runs a `BakeJumpTimeline` MSBuild target: it builds `Tl.Bake`, then bakes 
 ```sh
 dotnet run
 ```
-
-`dotnet run -- --verify` plays the same loop silently except dispatch cues and asserts the golden `y` sequence frame by frame — non-zero exit on the first wrong frame, `ok` on success.
 
 To bake by hand: `tlb jump.json jump.tlb --assembly bin/Debug/net10.0/TlJump.dll` (`tlb` is the `Tl.Bake` dotnet tool — `dotnet tool install -g Tl.Bake --prerelease` once published, or `dotnet run --project <tl>/tools/Tl.Bake --` from a checkout).
 
