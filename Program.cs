@@ -22,7 +22,10 @@ static void PlayFrame(World world)
                  .EnumerateChunks<TimelineIndex, TimelinePosition, JumpY, JumpPower>())
     {
         if (ids.Length == 0) continue;
-        Timeline<JumpTrack, JumpClip>.Apply(ids, positions, true, y, powers);
+        var set = new ColumnSet();
+        set.Add(y);
+        set.Add(powers);
+        Timeline<JumpTrack, JumpClip>.Apply(ids, positions, true, in set);
         Timeline<SoundTrack, SoundClip>.Apply(ids, positions, true);
         Timeline<JumpTrack, JumpClip>.Advance(ids, positions, true);
     }
